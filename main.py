@@ -21,25 +21,40 @@ from keras import models
 from keras import layers
 from keras import utils
 
-#from nltk.tokenize.moses import MosesDetokenizer
-#detokenizer = MosesDetokenizer()
+# This tokenizer is nice, but could cause problems.
+try:
+    from nltk.tokenize.moses import MosesDetokenizer
+    detokenizer = MosesDetokenizer()
+    use_moses_detokenizer = True
+except:
+    use_moses_detokenizer = False
 
+
+# Corpus parameters.
+download_anyway = False
 corpus_url = "https://archive.org/stream/TheCollectedWorksOfH.p.Lovecraft/The-Collected-Works-of-HP-Lovecraft_djvu.txt"
 corpus_path = "lovecraft.txt"
 
-preprocess_anyway = True
+# Preprocessing parameters.
+preprocess_anyway = False
 preprocessed_corpus_path = "lovecraft_preprocessed.p"
 most_common_words_number = 10000
 
+# Training parameters.
+train_anyway = False
 model_path = "model.h5"
 dataset_size = 50000
 sequence_length = 30
-epochs = 40
+epochs = 10
 batch_size = 128
 hidden_size = 1000
 
+# Generation parameters.
+generated_sequence_length = 500
+
 
 def main():
+    """ The main-method. Where the fun begins. """
 
     download_corpus_if_necessary()
 
@@ -51,7 +66,12 @@ def main():
 
 
 def download_corpus_if_necessary():
-    if not os.path.exists(corpus_path):
+    """
+    Downloads the corpus either if it is not on the hard-drive or of the
+    download is forced.
+    """
+
+    if not os.path.exists(corpus_path) or download_anyway == True:
         print("Downloading corpus...")
 
         # Dowloading content.
@@ -76,6 +96,11 @@ def download_corpus_if_necessary():
 
 
 def preprocess_corpus_if_necessary():
+    """
+    Preprocesses the corpus either if it has not been done before or if it is
+    forced.
+    """
+
     if not os.path.exists(preprocessed_corpus_path) or preprocess_anyway == True:
         print("Preprocessing corpus...")
 
@@ -107,81 +132,98 @@ def preprocess_corpus_if_necessary():
 
 
 def train_neural_network():
+    """
+    Trains the corpus either if it has not been done before or if it is
+    forced.
+    """
 
-    # Loading index-encoded corpus and vocabulary.
-    indices, vocabulary = pickle.load(open(preprocessed_corpus_path, "rb"))
+    if not os.path.exists(model_path) or train_anyway == True:
 
-    # Get the dataset.
-    print("Getting the dataset...")
-    data_input, data_output = get_dataset(indices)
-    data_output = utils.to_categorical(data_output, num_classes=len(vocabulary))
+        # Loading index-encoded corpus and vocabulary.
+        indices, vocabulary = pickle.load(open(preprocessed_corpus_path, "rb"))
 
-    # Creating model.
-    print("Creating model...")
-    model = models.Sequential()
-    model.add(layers.Embedding(len(vocabulary), hidden_size, input_length=sequence_length))
-    #model.add(layers.LSTM(hidden_size, return_sequences=True))
-    #model.add(layers.LSTM(hidden_size, return_sequences=True))
-    model.add(layers.LSTM(hidden_size))
-    #model.add(layers.Dropout(0.5))
-    #model.add(layers.TimeDistributed(layers.Dense(len(vocabulary))))
-    model.add(layers.Dense(len(vocabulary)))
-    model.add(layers.Activation('softmax'))
-    model.summary()
+        # Get the dataset.
+        print("Getting the dataset...")
+        data_input, data_output = get_dataset(indices)
+        data_output = utils.to_categorical(data_output, num_classes=len(vocabulary))
 
-    print("Compiling model...")
-    model.compile(
-        loss='categorical_crossentropy',
-        optimizer='adam',
-        metrics=['categorical_accuracy']
-    )
+        # Creating the model.
+        print("Creating model...")
+        model = models.Sequential()
+        model.add(layers.Embedding(len(vocabulary), hidden_size, input_length=sequence_length))
+        model.add(layers.LSTM(hidden_size))
+        model.add(layers.Dense(len(vocabulary)))
+        model.add(layers.Activation('softmax'))
+        model.summary()
 
-    print("Training model...")
-    history = model.fit(
-        data_input, data_output,
-        epochs=epochs, batch_size=batch_size)
-    model.save(model_path)
-    plot_history(history)
+        # Compining the model.
+        print("Compiling model...")
+        model.compile(
+            loss='categorical_crossentropy',
+            optimizer='adam',
+            metrics=['categorical_accuracy']
+        )
+
+        # Training the model.
+        print("Training model...")
+        history = model.fit(
+            data_input, data_output,
+            epochs=epochs, batch_size=batch_size)
+        model.save(model_path)
+        plot_history(history)
 
 
 def get_dataset(indices):
+    """ Gets a full dataset of a defined size from the corpus. """
 
+    print("Generating data set...")
     data_input = []
     data_output = []
     current_size = 0
-    print("Generating data set...")
     bar = progressbar.ProgressBar(max_value=dataset_size)
     while current_size < dataset_size:
+
+        # Randomly retriev a sequence of tokens and the token right after it.
         random_index = random.randint(0, len(indices) - (sequence_length + 1))
         input_sequence = indices[random_index:random_index + sequence_length]
         output_sequence = indices[random_index + sequence_length]
 
+        # Update arrays.
         data_input.append(input_sequence)
         data_output.append(output_sequence)
 
+        # Next step.
         current_size += 1
         bar.update(current_size)
     bar.finish()
 
+    # Done. Return NumPy-arrays.
     data_input = np.array(data_input)
     data_output = np.array(data_output)
     return (data_input, data_output)
 
 
 def generate_texts():
+    """ Generates a couple of random texts. """
 
     print("Generating texts...")
-    indices, vocabulary = pickle.load(open(preprocessed_corpus_path, "rb"))
 
+    # Getting all necessary data. That is the preprocessed corpus and the model.
+    indices, vocabulary = pickle.load(open(preprocessed_corpus_path, "rb"))
     model = models.load_model(model_path)
 
-    generated_sequence_length = 100
-
+    # Generate a couple of texts.
     for _ in range(10):
+
+        # Get a random temperature for prediction.
         temperature = random.uniform(0.0, 1.0)
+        print("Temperature:", temperature)
+
+        # Get a random sample as seed sequence.
         random_index = random.randint(0, len(indices) - (generated_sequence_length))
         input_sequence = indices[random_index:random_index + sequence_length]
 
+        # Generate the sequence by repeatedly predicting.
         generated_sequence = []
         generated_sequence.extend(input_sequence)
         while len(generated_sequence) < generated_sequence_length:
@@ -191,11 +233,10 @@ def generate_texts():
             input_sequence = input_sequence[1:]
             input_sequence.append(predicted_index)
 
-        decoded_tokens = [vocabulary[index] for index in generated_sequence]
-        decoded_tokens.insert(sequence_length, "|")
-        text = " ".join(decoded_tokens)
+        # Convert the generated sequence to a string.
+        text = decode_indices(generated_sequence, vocabulary)
         print(text)
-        #print(decode_indices(generated_sequence, vocabulary))
+        print("")
 
 
 def get_index_from_prediction(prediction, temperature=0.0):
@@ -216,16 +257,24 @@ def get_index_from_prediction(prediction, temperature=0.0):
 
 
 def encode_sequence(sequence, vocabulary):
+    """ Encodes a sequence of tokens into a sequence of indices. """
+
     return [vocabulary.index(element) for element in sequence if element in vocabulary]
 
 
 def decode_indices(indices, vocabulary):
-    tokens = [vocabulary[index] for index in indices]
-    return detokenizer.detokenize(tokens, return_str=True)
+    """ Decodes a sequence of indices and returns a string. """
+
+    decoded_tokens = [vocabulary[index] for index in indices]
+    if use_moses_detokenizer  == True:
+        return detokenizer.detokenize(decoded_tokens, return_str=True)
+    else:
+        return " ".join(decoded_tokens)
 
 
 def plot_history(history):
     """ Plots the history of a training. """
+
     print(history.history.keys())
 
     # Render the loss.
@@ -247,7 +296,6 @@ def plot_history(history):
     plt.clf()
 
     plt.show()
-
 
 
 if __name__ == "__main__":
